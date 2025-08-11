@@ -21,8 +21,6 @@ The final product will be a language model that can reason through complex probl
 
 ## **3. Project Structure**
 
-A modular structure will be used to separate concerns.
-
 ```
 /
 ├── data/

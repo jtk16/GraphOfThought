@@ -1,11 +1,11 @@
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.kvtg.graph import ThoughtGraph, ThoughtNode, ThoughtEdge
-# from src.kvtg.storage import KVTGStorage # To be implemented
+from src.kvtg.storage import KVTGStorage, KVCacheType
 
 class KVTGController:
     """
@@ -18,11 +18,11 @@ class KVTGController:
     4. Adding the new thoughts as nodes to the graph.
     5. Repeating until a solution is found or resources are exhausted.
     """
-    def __init__(self, model: AutoModelForCausalLM, tokenizer: AutoTokenizer, exploration_budget: int = 50, beam_width: int = 3):
+    def __init__(self, model: AutoModelForCausalLM, tokenizer: AutoTokenizer, storage: KVTGStorage, exploration_budget: int = 50, beam_width: int = 3):
         self.model = model
         self.tokenizer = tokenizer
         self.device = model.device
-        # self.storage = KVTGStorage(device=self.device) # Manages KV-cache snapshots
+        self.storage = storage # Manages KV-cache snapshots
         
         # --- Search Strategy Parameters ---
         self.exploration_budget = exploration_budget # Max number of nodes to generate
@@ -53,11 +53,12 @@ class KVTGController:
         path_str = "\n".join(path_nodes)
         return f"Question: {graph.question}\n\nReasoning Path:\n{path_str}\n\nNext Step:"
 
-    def _generate_next_steps(self, prompt: str, past_key_values: Optional[torch.Tensor]) -> List[str]:
+    def _generate_next_steps(self, prompt: str, past_key_values: Optional[KVCacheType]) -> Tuple[List[str], List[KVCacheType]]:
         """
         Generates a beam of possible next thoughts from a given state.
+        Returns the generated texts and their corresponding KV-cache states.
         """
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+        inputs = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False).to(self.device)
         
         # The core generation call.
         # `past_key_values` would be retrieved from self.storage for the parent node.
@@ -70,16 +71,19 @@ class KVTGController:
             num_return_sequences=self.beam_width,
             early_stopping=True,
             pad_token_id=self.tokenizer.eos_token_id,
-            output_past=True # We need the new KV cache
+            return_dict_in_generate=True,
+            output_scores=True, # Needed for return_dict_in_generate
+            output_past=True, # We need the new KV cache
         )
 
-        # TODO: The new KV-cache for each generated sequence needs to be captured
-        # and stored in self.storage. This is a key part of the KVTG process.
+        # The new KV-cache for each generated sequence needs to be captured.
+        new_kv_caches = outputs.past_key_values
 
-        generated_texts = self.tokenizer.batch_decode(outputs.sequences, skip_special_tokens=True)
-        # We only want the newly generated part, not the whole prompt.
-        next_steps = [text[len(prompt):].strip() for text in generated_texts]
-        return next_steps
+        # We need to decode only the newly generated tokens, not the input prompt.
+        input_length = inputs.input_ids.shape[1]
+        generated_sequences = outputs.sequences[:, input_length:]
+        next_steps = self.tokenizer.batch_decode(generated_sequences, skip_special_tokens=True)
+        return [text.strip() for text in next_steps], new_kv_caches
 
     def _select_nodes_to_expand(self, graph: ThoughtGraph) -> List[ThoughtNode]:
         """
@@ -96,28 +100,46 @@ class KVTGController:
         Main entry point to start the graph-based reasoning process.
         """
         logging.info(f"Starting KVTG exploration for question: '{question}'")
-        graph = ThoughtGraph(id="g1", question=question, final_answer="") # Simplified ID
+        graph_id = f"g_{torch.randint(0, 100000, (1,)).item()}"
+        graph = ThoughtGraph(id=graph_id, question=question, final_answer="")
         # The root node represents the initial state before any thoughts.
-        root_node = ThoughtNode(id="0", text="Start")
+        # It has no text and no KV-cache.
+        root_node = ThoughtNode(id="0", text="Start", kv_cache_id=None)
         graph.add_node(root_node)
 
-        for i in range(self.exploration_budget):
+        nodes_generated = 0
+        while nodes_generated < self.exploration_budget:
             nodes_to_expand = self._select_nodes_to_expand(graph)
             if not nodes_to_expand:
                 logging.warning("Exploration stalled: no more nodes to expand.")
                 break
 
             for node in nodes_to_expand:
-                # In a real implementation, we'd fetch the KV-cache for `node.id` here.
-                # parent_kv_cache = self.storage.get(node.id)
+                if nodes_generated >= self.exploration_budget: break
+
+                # Fetch the KV-cache for the parent node. For the root node, this will be None.
+                parent_kv_cache = self.storage.get(node.kv_cache_id) if node.kv_cache_id else None
                 prompt = self._format_prompt_for_node(graph, node.id)
                 
-                # new_thoughts = self._generate_next_steps(prompt, parent_kv_cache)
-                # For now, we pass None for the cache.
-                new_thoughts = self._generate_next_steps(prompt, None)
+                new_thoughts, new_kv_caches = self._generate_next_steps(prompt, parent_kv_cache)
 
-                # TODO: Add new thoughts as nodes to the graph, linking them to the parent.
-                # TODO: Check if any new thought represents a complete solution.
+                for i, (thought_text, kv_cache) in enumerate(zip(new_thoughts, new_kv_caches)):
+                    if nodes_generated >= self.exploration_budget: break
 
-        logging.info("Exploration budget reached.")
+                    new_node_id = f"{node.id}-{i}"
+                    kv_cache_id = f"{graph.id}-{new_node_id}"
+                    self.storage.store(kv_cache_id, kv_cache)
+
+                    new_node = ThoughtNode(id=new_node_id, text=thought_text, kv_cache_id=kv_cache_id)
+                    graph.add_node(new_node)
+                    graph.add_edge(ThoughtEdge(source=node.id, target=new_node.id))
+                    nodes_generated += 1
+
+                    # Check for a solution
+                    if "Final Answer:" in thought_text:
+                        logging.info(f"Solution found at node {new_node_id}. Stopping exploration.")
+                        graph.final_answer = thought_text # Or parse it more carefully
+                        return graph
+            
+        logging.info(f"Exploration budget of {self.exploration_budget} nodes reached.")
         return graph

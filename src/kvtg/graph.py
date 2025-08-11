@@ -7,7 +7,8 @@ class ThoughtNode:
     """Represents a single node in the thought graph."""
     id: str
     text: str
-    # In the full KVTG implementation, this would also hold kv_ptr, embeddings, etc.
+    # The kv_cache_id is a pointer to the snapshot in the KVTGStorage.
+    kv_cache_id: Optional[str] = None
 
 @dataclass
 class ThoughtEdge:
