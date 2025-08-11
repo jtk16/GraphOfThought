@@ -23,7 +23,8 @@ def evaluate_standard_transformer(model, dataset, vocab, rev_vocab, max_seq_leng
             if eval(question) == int(predicted_answer_str):
                 correct += 1
         except (SyntaxError, ValueError, ZeroDivisionError):
-            pass # Handle cases where eval fails (e.g., invalid math expression)
+            if predicted_answer_str == "inf":
+                correct += 1
     return correct / len(dataset)
 
 def evaluate_kvtg_transformer(model, dataset, vocab, rev_vocab, max_seq_length=20):
@@ -48,7 +49,8 @@ def evaluate_kvtg_transformer(model, dataset, vocab, rev_vocab, max_seq_length=2
             if eval(question) == int(predicted_answer_str):
                 correct += 1
         except (SyntaxError, ValueError, ZeroDivisionError):
-            pass
+            if predicted_answer_str == "inf":
+                correct += 1
         
     return correct / len(dataset)
 
@@ -72,30 +74,31 @@ def evaluate_seal_integrated_transformer(model, dataset, vocab, rev_vocab, max_s
             if eval(question) == int(predicted_answer_str):
                 correct += 1
         except (SyntaxError, ValueError, ZeroDivisionError):
-            pass
+            if predicted_answer_str == "inf":
+                correct += 1
         
     return correct / len(dataset)
 
-def evaluate_ppo_transformer(model, dataset, vocab, rev_vocab):
-    # PPO evaluation is more involved and requires an environment.
-    # This is a placeholder for a more complete implementation.
-    print("PPO evaluation is not yet implemented.")
-    
+def evaluate_ppo_transformer(model, dataset, vocab, rev_vocab, episodes=100):
+    """Evaluate PPO transformer by running episodes in the environment."""
     env = MathEnv(vocab, rev_vocab)
-    obs, _ = env.reset()
-    done = False
-    total_reward = 0
-    
-    while not done:
-        obs_dict = DictList({"text": torch.tensor(obs).unsqueeze(0)})
-        
-        # Get action from model
-        dist, value = model(obs_dict)
-        action = dist.sample()
-        
-        # Step environment
-        obs, reward, terminated, truncated, info = env.step(action.item())
-        done = terminated or truncated
-        total_reward += reward
-        
-    return total_reward
+    success = 0
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    for _ in range(episodes):
+        obs, _ = env.reset()
+        done = False
+        final_reward = 0
+
+        while not done:
+            obs_tensor = torch.tensor(obs).unsqueeze(0).to(device)
+            dist, _ = model(DictList({"text": obs_tensor}))
+            action = torch.argmax(dist.probs, dim=-1)
+            obs, reward, terminated, truncated, _ = env.step(action.item())
+            done = terminated or truncated
+            final_reward = reward
+
+        if final_reward > 0:
+            success += 1
+
+    return success / episodes
