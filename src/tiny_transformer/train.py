@@ -1,10 +1,6 @@
 import torch
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from .standard_transformer import StandardTransformer
-from .torch_ac.algos import PPOAlgo
-from .kvtg_integration import KVTGIntegratedTransformer
-from .seal_integration import SEALIntegratedTransformer
 from .math_env import MathEnv
 from .torch_ac.utils.dictlist import DictList
 from .utils import tokenize_string, detokenize_tensor
@@ -27,7 +23,8 @@ class MathDataset(Dataset):
                 answer = str(a * b)
             else:
                 question = f"{a}/{b}"
-                answer = str(a / b) if b != 0 else "inf"
+                # Use integer division and return 'inf' for invalid cases
+                answer = str(a // b) if b != 0 and a % b == 0 else "inf"
             self.samples.append((question, answer))
 
     def __len__(self):
@@ -116,55 +113,47 @@ def train_seal_integrated_transformer(model, dataset, vocab, rev_vocab, epochs=1
             loss.backward()
             optimizer.step()
 
-def train_ppo_transformer(model, dataset, vocab, rev_vocab, epochs=10):
-    # PPO training is more involved and requires an environment.
-    # This is a placeholder for a more complete implementation.
-    print("PPO training is not yet implemented.")
-    
-    # Create a dummy environment for PPO
+def train_ppo_transformer(model, dataset, vocab, rev_vocab, epochs=10, gamma=0.99):
+    """Train PPO transformer on the MathEnv environment."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
     env = MathEnv(vocab, rev_vocab)
-    
-    # PPOAlgo expects a model that inherits from ACModel
-    # Our PPOTransformer inherits from ACModel
-    
-    # Create a PPO agent
-    algo = PPOAlgo([env], model, device=torch.device("cuda" if torch.cuda.is_available() else "cpu"), num_frames_per_proc=1) # Added num_frames_per_proc
-    
-    num_frames = 1000 # Number of frames to train for
-    
-    # Collect experiences and update model
-    obs = env.reset()
-    for i in range(num_frames):
-        # Convert numpy array observation to DictList
-        obs_dict = DictList({"text": torch.tensor(obs[0]).unsqueeze(0)})
-        
-        # Get action from model
-        dist, value = model(obs_dict)
-        action = dist.sample()
-        
-        # Step environment
-        obs, reward, terminated, truncated, info = env.step(action.item())
-        done = terminated or truncated
-        
-        # Update algo
-        # This is a very simplified update. A real PPO loop is more complex.
-        # It involves storing experiences, computing advantages, and updating the model.
-        # For now, we'll just do a dummy update.
-        
-        # Create dummy experiences for the algo
-        exps = DictList({
-            "obs": obs_dict,
-            "action": action.unsqueeze(0),
-            "value": value.unsqueeze(0),
-            "reward": torch.tensor([reward]).unsqueeze(0),
-            "mask": torch.tensor([1-done]).unsqueeze(0),
-            "log_prob": dist.log_prob(action).unsqueeze(0),
-            "advantage": torch.tensor([0.0]).unsqueeze(0), # Dummy advantage
-            "returnn": torch.tensor([0.0]).unsqueeze(0) # Dummy return
-        })
-        
-        # Update the algorithm
-        algo.update_parameters(exps)
-        
-        if done:
-            obs = env.reset()
+
+    for _ in range(epochs):
+        obs, _ = env.reset()
+        done = False
+
+        log_probs = []
+        values = []
+        rewards = []
+
+        while not done:
+            obs_tensor = torch.tensor(obs).unsqueeze(0).to(device)
+            dist, value = model(DictList({"text": obs_tensor}))
+            action = dist.sample()
+            log_probs.append(dist.log_prob(action))
+            values.append(value)
+
+            obs, reward, terminated, truncated, _ = env.step(action.item())
+            done = terminated or truncated
+            rewards.append(torch.tensor([reward], device=device))
+
+        # Compute returns
+        returns = []
+        G = torch.tensor([0.0], device=device)
+        for r in reversed(rewards):
+            G = r + gamma * G
+            returns.insert(0, G)
+        returns = torch.cat(returns)
+        log_probs = torch.cat(log_probs)
+        values = torch.cat(values).squeeze(-1)
+
+        advantages = returns - values.detach()
+        policy_loss = -(log_probs * advantages).mean()
+        value_loss = (returns - values).pow(2).mean()
+        entropy = - (log_probs.exp() * log_probs).mean()
+        loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
