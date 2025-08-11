@@ -1,12 +1,10 @@
-# Byte-compiled / optimized / DLL files
+# KVTG + SEAL Project .gitignore
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
-
-# C extensions
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -23,30 +21,198 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Python virtualenv
-.env
-env/
+# Virtual environments
 venv/
+env/
+ENV/
+.venv/
+.env/
+.ENV/
 
-# IDE and editor files
+# PyTorch and ML
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.bin
+*.pickle
+*.pkl
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Model files and checkpoints
+models/
+checkpoints/
+model_cache/
+*/checkpoints/
+*/models/
+*.model
+*.weights
+
+# HuggingFace cache
+.cache/
+transformers_cache/
+tokenizers_cache/
+hub/
+
+# Training outputs and logs
+logs/
+runs/
+tensorboard/
+wandb/
+mlruns/
+lightning_logs/
+*.log
+train_*.json
+eval_*.json
+
+# Data files
+data/raw/
+data/processed/
+data/validated/
+*.jsonl
+*.csv
+*.tsv
+*.parquet
+*.arrow
+dataset_dict.json
+state.json
+dataset_info.json
+
+# KV-Cache storage
+kvtg_cache/
+kv_cache/
+*/kv_cache/
+*.cache
+cache/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Windows
+*.exe
+*.msi
+*.msm
+*.msp
+
+# IDE files
 .vscode/
 .idea/
+*.sublime-project
+*.sublime-workspace
+.spyderproject
+.spyproject
+.ropeproject
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 
-# Project-specific - VERY IMPORTANT
-/data/raw/
-/data/processed/
-/models/
-/notebooks/.ipynb_checkpoints
+# Coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
 
-# Log files
-*.log
-logs/
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
-# OS-specific files
-.DS_Store
-Thumbs.db
+# Pyre type checker
+.pyre/
+
+# Configuration files with secrets
+config.ini
+config.yaml
+config.json
+.env.local
+.env.production
+secrets.yaml
+api_keys.txt
+
+# Demo and test outputs
+demo_output/
+test_results.json
+test_output/
+*/demo_output/
+
+# Large model files (use Git LFS if needed)
+*.h5
+*.onnx
+
+# Compressed files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Node.js (if using any JS tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Documentation builds (keep docs/ folder with markdown files)
+docs/_build/
+docs/build/
+site/
+*.pdf
+*.docx
+
+# Benchmark results and analysis
+benchmarks/*.json
+benchmarks/results/
+benchmark_results/
+performance_logs/
+
+# Backup files
+*.bak
+*.backup
+
+# Training experiment artifacts
+experiments/
+experiment_*/
+results/
+outputs/
+checkpoints_*/
+
+# Profiling and debugging
+*.trace
+*.prof
+memory_profiler_*.dat
+
+# Lock files
+poetry.lock
+Pipfile.lock
