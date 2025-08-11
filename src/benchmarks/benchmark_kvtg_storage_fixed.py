@@ -38,6 +38,7 @@ class BenchmarkResult:
     """Single benchmark measurement result."""
     tensor_shape: Tuple[int, ...]
     compression_method: str
+    quantization_type: str
     compression_ratio: float
     reconstruction_error: float
     compress_time_ms: float
@@ -51,12 +52,12 @@ class BenchmarkResult:
 class BenchmarkConfig:
     """Configuration for benchmark runs."""
     tensor_configs: List[Tuple[int, ...]]
-    compression_methods: List[CompressionMethod]
+    compression_methods: List[Tuple[CompressionMethod, QuantizationType]]
     num_runs: int = 5
     warmup_runs: int = 2
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     save_results: bool = True
-    results_path: str = "benchmark_results.json"
+    results_path: str = "benchmarks/kvtg_storage_results.json"
 
 class KVTGStorageBenchmark:
     """Comprehensive benchmark suite for KVTGStorage performance."""
@@ -162,7 +163,7 @@ class KVTGStorageBenchmark:
         # Warmup runs
         for _ in range(self.config.warmup_runs):
             storage.store("warmup", kv_cache)
-            storage.retrieve("warmup")
+            storage.get("warmup")
         
         # Clear cache
         storage._memory_cache.clear()
@@ -205,7 +206,7 @@ class KVTGStorageBenchmark:
             
             # Measure decompression time
             start_time = time.perf_counter()
-            retrieved_kv = storage.retrieve(key_id)
+            retrieved_kv = storage.get(key_id)
             decompress_time = (time.perf_counter() - start_time) * 1000  # ms
             decompress_times.append(decompress_time)
             
@@ -235,6 +236,7 @@ class KVTGStorageBenchmark:
         return BenchmarkResult(
             tensor_shape=tensor_shape,
             compression_method=compression_method.name,
+            quantization_type=quantization_type.name,
             compression_ratio=compression_ratio,
             reconstruction_error=avg_reconstruction_error,
             compress_time_ms=avg_compress_time,
@@ -293,10 +295,10 @@ class KVTGStorageBenchmark:
         # Group results by method
         method_results = {}
         for result in self.results:
-            method = result.compression_method
-            if method not in method_results:
-                method_results[method] = []
-            method_results[method].append(result)
+            method_key = f"{result.compression_method}_{result.quantization_type}"
+            if method_key not in method_results:
+                method_results[method_key] = []
+            method_results[method_key].append(result)
         
         # Calculate summary statistics
         summary = {

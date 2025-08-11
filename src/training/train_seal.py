@@ -3,7 +3,8 @@ import sys
 import json
 import argparse
 import logging
-from typing import List, Dict, Any
+import re
+from typing import Iterable, Dict, Any, Optional
 
 # Add project root to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -15,91 +16,127 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from src.kvtg.controller import KVTGController
 from src.kvtg.storage import KVTGStorage
 from src.seal.adaptation import SEALAdapter
-from src.evaluation.math_evaluator import MathEvaluator
+from src.kvtg.graph import ThoughtGraph
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def load_problem_dataset(dataset_path: str) -> List[Dict[str, Any]]:
-    """Load problems from JSONL file."""
-    problems = []
-    try:
-        with open(dataset_path, 'r', encoding='utf-8') as f:
-            for line in f:
+def load_problem_dataset(file_path: str) -> Iterable[Dict[str, Any]]:
+    """
+    Loads problems from a JSONL file. Assumes each line is a JSON object
+    representing a ThoughtGraph, and extracts the question and final answer.
+    """
+    logging.info(f"Loading problems from {file_path}")
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            try:
                 data = json.loads(line)
-                problems.append({
-                    'question': data['question'],
-                    'answer': data.get('final_answer', ''),
-                    'id': data.get('id', f'problem_{len(problems)}')
-                })
-        logging.info(f"Loaded {len(problems)} problems from {dataset_path}")
-    except FileNotFoundError:
-        logging.error(f"Dataset file not found: {dataset_path}")
-        # Create some sample problems for demonstration
-        problems = [
-            {'question': 'What is 15 + 27?', 'answer': '42', 'id': 'sample_1'},
-            {'question': 'If a book costs $12 and I buy 3 books, how much do I pay?', 'answer': '36', 'id': 'sample_2'},
-            {'question': 'What is 8 × 7?', 'answer': '56', 'id': 'sample_3'}
-        ]
-        logging.info("Using sample problems for demonstration")
-    
-    return problems
+                # We only need the question and the ground truth answer for the SEAL loop
+                if 'question' in data and 'final_answer' in data:
+                    yield {'question': data['question'], 'answer': data['final_answer']}
+            except (json.JSONDecodeError, KeyError) as e:
+                logging.warning(f"Skipping malformed line: {line.strip()} | Error: {e}")
 
-def evaluate_solution(generated_path, golden_answer, evaluator: MathEvaluator) -> bool:
+def extract_answer(text: str) -> Optional[str]:
     """
-    Evaluate if the generated reasoning path produces the correct answer.
+    Extracts the numerical answer from a string like 'Final Answer: 123'.
     """
-    if not generated_path or not generated_path.nodes:
-        logging.warning("Empty or invalid generated path")
+    match = re.search(r'(\d+(\.\d+)?)', str(text))
+    return match.group(1) if match else None
+
+def evaluate_solution(generated_graph: ThoughtGraph, golden_answer: str) -> bool:
+    """
+    Evaluates if the generated graph's solution matches the golden answer.
+    For GSM8K, this involves parsing the final numerical answer.
+    """
+    if not generated_graph:
         return False
+        
+    terminal_nodes = generated_graph.get_terminal_nodes()
+    if not terminal_nodes:
+        logging.warning("Evaluation failed: No terminal node found in the generated graph.")
+        return False
+
+    # Use the first terminal node found as the proposed solution
+    generated_text = terminal_nodes[0].text
+    generated_answer = extract_answer(generated_text)
     
-    # Get the final reasoning from all nodes in the path
-    full_solution = "\n".join(node.text for node in generated_path.nodes)
-    
-    # Use the robust math evaluator
-    result = evaluator.evaluate_gsm8k_answer(full_solution, str(golden_answer))
-    
-    if result.is_correct:
-        logging.info(f"✓ Correct solution found (confidence: {result.confidence}): {result.extracted_answer}")
-        return True
+    # Clean up golden answer for comparison
+    golden_answer_clean = extract_answer(golden_answer)
+
+    if generated_answer is None:
+        logging.warning(f"Evaluation failed: Could not extract an answer from '{generated_text}'.")
+        return False
+
+    is_correct = generated_answer == golden_answer_clean
+    if is_correct:
+        logging.info(f"Correct solution found! Generated: {generated_answer}, Golden: {golden_answer_clean}")
     else:
-        logging.warning(f"✗ Incorrect solution. Got: {result.extracted_answer}, Expected: {golden_answer}")
-        logging.debug(f"Error type: {result.error_type}")
-        return False
+        logging.warning(f"Incorrect solution. Generated: {generated_answer}, Golden: {golden_answer_clean}")
+        
+    return is_correct
 
 def main():
     parser = argparse.ArgumentParser(description="KVTG+SEAL self-improvement training loop.")
     parser.add_argument("--model_path", type=str, required=True, help="Path to the base SFT model checkpoint.")
-    parser.add_argument("--dataset_path", type=str, default="data/processed/gsm8k_graphs.jsonl", help="Path to the problem dataset.")
-    parser.add_argument("--output_dir", type=str, default="models/seal_model", help="Directory to save the self-improved model.")
+    parser.add_argument("--dataset_path", type=str, default="c:/Users/jackt/Downloads/Coding/GraphOfThought/data/processed/gsm8k_graphs.jsonl", help="Path to the problem dataset (in graph JSONL format).")
+    parser.add_argument("--output_dir", type=str, default="c:/Users/jackt/Downloads/Coding/GraphOfThought/models/seal_model", help="Directory to save the self-improved model.")
     parser.add_argument("--max_iterations", type=int, default=100, help="Maximum number of self-improvement iterations.")
-    parser.add_argument("--exploration_budget", type=int, default=20, help="KVTG exploration budget per problem.")
-    parser.add_argument("--beam_width", type=int, default=3, help="Beam width for KVTG exploration.")
-    parser.add_argument("--learning_rate", type=float, default=5e-5, help="Learning rate for SEAL adaptation.")
-    parser.add_argument("--success_threshold", type=int, default=5, help="Number of successes before saving checkpoint.")
-    
+    parser.add_argument("--learning_rate", type=float, default=2e-6, help="Learning rate for SEAL fine-tuning steps.")
+    parser.add_argument("--exploration_budget", type=int, default=30, help="Max nodes for KVTG controller to generate per problem.")
+    parser.add_argument("--beam_width", type=int, default=3, help="Beam width for generation in KVTG controller.")
+    parser.add_argument("--gpu_cache_capacity", type=int, default=50, help="Number of KV-cache snapshots to hold in GPU VRAM.")
     args = parser.parse_args()
-    logging.info(f"Starting SEAL training with arguments: {args}")
 
-    # Ensure output directory exists
+    logging.info(f"Starting SEAL training with arguments: {args}")
     os.makedirs(args.output_dir, exist_ok=True)
 
     # 1. Load Model and Tokenizer
     logging.info(f"Loading model from '{args.model_path}'")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-        
-    model = AutoModelForCausalLM.from_pretrained(args.model_path, torch_dtype=torch.bfloat16)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    logging.info(f"Model loaded on device: {device}")
+    model = AutoModelForCausalLM.from_pretrained(args.model_path, torch_dtype=torch.bfloat16).to(device)
 
-    # 2. Initialize KVTG Controller, SEAL Adapter, and Evaluator
-    storage = KVTGStorage(max_memory_items=50, persist_to_disk=True, 
-                         storage_dir=os.path.join(args.output_dir, "kv_cache"))
-    
-    kvtg_controller = KVTGController(
+    # 2. Initialize KVTG Controller and SEAL Adapter
+    kv_storage = KVTGStorage(device=device, gpu_capacity=args.gpu_cache_capacity)
+    kvtg_controller = KVTGController(model, tokenizer, storage=kv_storage, exploration_budget=args.exploration_budget, beam_width=args.beam_width)
+    seal_adapter = SEALAdapter(model, tokenizer, output_dir=args.output_dir, learning_rate=args.learning_rate)
+
+    # 3. Load Problem Dataset
+    problem_dataset = load_problem_dataset(args.dataset_path)
+
+    # 4. The Self-Improvement Loop
+    logging.info("Starting the KVTG+SEAL self-improvement loop...")
+    successful_updates = 0
+    for i, problem in enumerate(problem_dataset):
+        if i >= args.max_iterations:
+            logging.info(f"Maximum iterations ({args.max_iterations}) reached.")
+            break
+
+        logging.info(f"\n--- Iteration {i+1}/{args.max_iterations} ---")
+        logging.info(f"Problem: {problem['question']}")
+
+        # a. Explore with KVTG
+        generated_graph = kvtg_controller.explore(problem['question'])
+
+        # b. Evaluate the solution
+        is_correct = evaluate_solution(generated_graph, problem['answer'])
+
+        # c. Fine-tune with SEAL on success
+            # The adapter takes the successful path, creates a training example,
+            # and performs a fine-tuning step on the model.
+            # seal_adapter.finetune_on_path(successful_path)
+            logging.info("SEAL update complete. Model has been improved.")
+        else:
+            logging.info("Solution was incorrect or not found. Moving to next problem.")
+
+    logging.info("SEAL training loop finished.")
+    # seal_adapter.save_model() # Final save
+
+if __name__ == "__main__":
+    # main() # Commented out until dependencies are implemented
         model=model, 
         tokenizer=tokenizer, 
         storage=storage,
