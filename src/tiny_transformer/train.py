@@ -25,6 +25,8 @@ class MathDataset(Dataset):
                 question = f"{a}/{b}"
                 # Use integer division and return 'inf' for invalid cases
                 answer = str(a // b) if b != 0 and a % b == 0 else "inf"
+                # Use integer division and return 'inf' for invalid cases
+                answer = str(a // b) if b != 0 and a % b == 0 else "inf"
             self.samples.append((question, answer))
 
     def __len__(self):
@@ -113,6 +115,10 @@ def train_seal_integrated_transformer(model, dataset, vocab, rev_vocab, epochs=1
             loss.backward()
             optimizer.step()
 
+def train_ppo_transformer(model, dataset, vocab, rev_vocab, epochs=10, gamma=0.99):
+    """Train PPO transformer on the MathEnv environment."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
 def train_ppo_transformer(model, dataset, vocab, rev_vocab, epochs=10, gamma=0.99):
     """Train PPO transformer on the MathEnv environment."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

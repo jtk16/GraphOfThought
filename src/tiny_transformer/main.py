@@ -54,12 +54,16 @@ except ImportError:  # pragma: no cover - import path adjustment for script use
 
 # Define vocabulary
 vocab = {str(i): i for i in range(10)}
+vocab = {str(i): i for i in range(10)}
 vocab.update({op: i + 10 for i, op in enumerate(['+', '-', '*', '/'])})
+vocab.update({'inf': 14, '<pad>': 15})
+rev_vocab = {v: k for k, v in vocab.items()}
 vocab.update({'inf': 14, '<pad>': 15})
 rev_vocab = {v: k for k, v in vocab.items()}
 
 # Model hyperparameters
 VOCAB_SIZE = len(vocab)
+D_MODEL = 64
 D_MODEL = 64
 NHEAD = 8
 NUM_ENCODER_LAYERS = 2
@@ -81,7 +85,17 @@ def main():
         DIM_FEEDFORWARD,
         MAX_SEQ_LENGTH,
     )
+    standard_model = StandardTransformer(
+        VOCAB_SIZE,
+        D_MODEL,
+        NHEAD,
+        NUM_ENCODER_LAYERS,
+        NUM_DECODER_LAYERS,
+        DIM_FEEDFORWARD,
+        MAX_SEQ_LENGTH,
+    )
     train_standard_transformer(standard_model, dataset, vocab)
+    standard_accuracy = evaluate_standard_transformer(standard_model, dataset, vocab, rev_vocab)
     standard_accuracy = evaluate_standard_transformer(standard_model, dataset, vocab, rev_vocab)
     print(f"Standard Transformer Accuracy: {standard_accuracy}")
 
@@ -89,7 +103,25 @@ def main():
     ppo_model = PPOTransformer(VOCAB_SIZE, D_MODEL, NHEAD, NUM_ENCODER_LAYERS, DIM_FEEDFORWARD, MAX_SEQ_LENGTH)
     train_ppo_transformer(ppo_model, dataset, vocab, rev_vocab)
     ppo_accuracy = evaluate_ppo_transformer(ppo_model, dataset, vocab, rev_vocab)
+    train_ppo_transformer(ppo_model, dataset, vocab, rev_vocab)
+    ppo_accuracy = evaluate_ppo_transformer(ppo_model, dataset, vocab, rev_vocab)
     print(f"PPO Transformer Accuracy: {ppo_accuracy}")
+
+    # Create and train KVTG transformer
+    kvtg_model = KVTGIntegratedTransformer(VOCAB_SIZE, D_MODEL, NHEAD, NUM_ENCODER_LAYERS, NUM_DECODER_LAYERS, DIM_FEEDFORWARD, MAX_SEQ_LENGTH, vocab, rev_vocab)
+    train_kvtg_transformer(kvtg_model, dataset, vocab)
+    kvtg_accuracy = evaluate_kvtg_transformer(kvtg_model, dataset, vocab, rev_vocab)
+    print(f"KVTG Transformer Accuracy: {kvtg_accuracy}")
+
+    # Create and train KVTG+SEAL transformer
+    seal_model = SEALIntegratedTransformer(
+        KVTGIntegratedTransformer(VOCAB_SIZE, D_MODEL, NHEAD, NUM_ENCODER_LAYERS, NUM_DECODER_LAYERS, DIM_FEEDFORWARD, MAX_SEQ_LENGTH, vocab, rev_vocab),
+        vocab,
+        rev_vocab,
+    )
+    train_seal_integrated_transformer(seal_model, dataset, vocab, rev_vocab)
+    seal_accuracy = evaluate_seal_integrated_transformer(seal_model, dataset, vocab, rev_vocab)
+    print(f"KVTG+SEAL Transformer Accuracy: {seal_accuracy}")
 
     # Create and train KVTG transformer
     kvtg_model = KVTGIntegratedTransformer(VOCAB_SIZE, D_MODEL, NHEAD, NUM_ENCODER_LAYERS, NUM_DECODER_LAYERS, DIM_FEEDFORWARD, MAX_SEQ_LENGTH, vocab, rev_vocab)
