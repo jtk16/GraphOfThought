@@ -25,6 +25,8 @@ def evaluate_standard_transformer(model, dataset, vocab, rev_vocab, max_seq_leng
         except (SyntaxError, ValueError, ZeroDivisionError):
             if predicted_answer_str == "inf":
                 correct += 1
+            if predicted_answer_str == "inf":
+                correct += 1
     return correct / len(dataset)
 
 def evaluate_kvtg_transformer(model, dataset, vocab, rev_vocab, max_seq_length=20):
@@ -49,6 +51,8 @@ def evaluate_kvtg_transformer(model, dataset, vocab, rev_vocab, max_seq_length=2
             if eval(question) == int(predicted_answer_str):
                 correct += 1
         except (SyntaxError, ValueError, ZeroDivisionError):
+            if predicted_answer_str == "inf":
+                correct += 1
             if predicted_answer_str == "inf":
                 correct += 1
         
@@ -76,9 +80,13 @@ def evaluate_seal_integrated_transformer(model, dataset, vocab, rev_vocab, max_s
         except (SyntaxError, ValueError, ZeroDivisionError):
             if predicted_answer_str == "inf":
                 correct += 1
+            if predicted_answer_str == "inf":
+                correct += 1
         
     return correct / len(dataset)
 
+def evaluate_ppo_transformer(model, dataset, vocab, rev_vocab, episodes=100):
+    """Evaluate PPO transformer by running episodes in the environment."""
 def evaluate_ppo_transformer(model, dataset, vocab, rev_vocab, episodes=100):
     """Evaluate PPO transformer by running episodes in the environment."""
     env = MathEnv(vocab, rev_vocab)
