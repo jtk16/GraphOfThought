@@ -7,7 +7,10 @@ class PPOTransformer(ACModel):
     def __init__(self, vocab_size, d_model, nhead, num_layers, dim_feedforward, max_seq_length):
         super(PPOTransformer, self).__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
-        self.transformer_layer = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward)
+        # Use batch_first so tensors are (batch, seq, feature)
+        self.transformer_layer = nn.TransformerEncoderLayer(
+            d_model, nhead, dim_feedforward, batch_first=True
+        )
         self.transformer_encoder = nn.TransformerEncoder(self.transformer_layer, num_layers)
         self.actor = nn.Linear(d_model, vocab_size)
         self.critic = nn.Linear(d_model, 1)

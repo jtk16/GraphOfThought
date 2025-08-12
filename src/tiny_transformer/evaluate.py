@@ -87,11 +87,10 @@ def evaluate_seal_integrated_transformer(model, dataset, vocab, rev_vocab, max_s
 
 def evaluate_ppo_transformer(model, dataset, vocab, rev_vocab, episodes=100):
     """Evaluate PPO transformer by running episodes in the environment."""
-def evaluate_ppo_transformer(model, dataset, vocab, rev_vocab, episodes=100):
-    """Evaluate PPO transformer by running episodes in the environment."""
     env = MathEnv(vocab, rev_vocab)
     success = 0
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
 
     for _ in range(episodes):
         obs, _ = env.reset()
@@ -99,7 +98,7 @@ def evaluate_ppo_transformer(model, dataset, vocab, rev_vocab, episodes=100):
         final_reward = 0
 
         while not done:
-            obs_tensor = torch.tensor(obs).unsqueeze(0).to(device)
+            obs_tensor = torch.tensor(obs, dtype=torch.long, device=device).unsqueeze(0)
             dist, _ = model(DictList({"text": obs_tensor}))
             action = torch.argmax(dist.probs, dim=-1)
             obs, reward, terminated, truncated, _ = env.step(action.item())
