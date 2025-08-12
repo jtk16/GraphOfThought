@@ -25,8 +25,6 @@ class MathDataset(Dataset):
                 question = f"{a}/{b}"
                 # Use integer division and return 'inf' for invalid cases
                 answer = str(a // b) if b != 0 and a % b == 0 else "inf"
-                # Use integer division and return 'inf' for invalid cases
-                answer = str(a // b) if b != 0 and a % b == 0 else "inf"
             self.samples.append((question, answer))
 
     def __len__(self):
@@ -118,10 +116,7 @@ def train_seal_integrated_transformer(model, dataset, vocab, rev_vocab, epochs=1
 def train_ppo_transformer(model, dataset, vocab, rev_vocab, epochs=10, gamma=0.99):
     """Train PPO transformer on the MathEnv environment."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-def train_ppo_transformer(model, dataset, vocab, rev_vocab, epochs=10, gamma=0.99):
-    """Train PPO transformer on the MathEnv environment."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     env = MathEnv(vocab, rev_vocab)
 
@@ -134,7 +129,7 @@ def train_ppo_transformer(model, dataset, vocab, rev_vocab, epochs=10, gamma=0.9
         rewards = []
 
         while not done:
-            obs_tensor = torch.tensor(obs).unsqueeze(0).to(device)
+            obs_tensor = torch.tensor(obs, dtype=torch.long, device=device).unsqueeze(0)
             dist, value = model(DictList({"text": obs_tensor}))
             action = dist.sample()
             log_probs.append(dist.log_prob(action))
